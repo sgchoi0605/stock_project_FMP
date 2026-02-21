@@ -279,19 +279,33 @@ class StockDetailScreen extends StatefulWidget {
 }
 
 class _StockDetailScreenState extends State<StockDetailScreen> {
-  late Future<StockDetailItem> _future;
+  late Future<_StockDetailPayload> _future;
 
   @override
   void initState() {
     super.initState();
-    _future = ApiService.fetchStockDetail(widget.symbol);
+    _future = _load();
+  }
+
+  Future<_StockDetailPayload> _load() async {
+    final detail = await ApiService.fetchStockDetail(widget.symbol);
+    List<IncomeStatementItem> financials = const [];
+    try {
+      financials = await ApiService.fetchFinancials(widget.symbol);
+    } catch (_) {
+      financials = const [];
+    }
+    return _StockDetailPayload(
+      detail: detail,
+      financials: financials,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text(widget.symbol)),
-      body: FutureBuilder<StockDetailItem>(
+      body: FutureBuilder<_StockDetailPayload>(
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -314,7 +328,7 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
                     FilledButton(
                       onPressed: () {
                         setState(() {
-                          _future = ApiService.fetchStockDetail(widget.symbol);
+                          _future = _load();
                         });
                       },
                       child: const Text('다시 시도'),
@@ -325,13 +339,15 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
             );
           }
 
-          final stock = snapshot.data;
-          if (stock == null) {
+          final payload = snapshot.data;
+          if (payload == null) {
             return const Center(
               child: Text('데이터가 없습니다.', style: TextStyle(color: tossSubtext)),
             );
           }
 
+          final stock = payload.detail;
+          final financials = payload.financials;
           final displayName = stock.name.isEmpty ? widget.fallbackName : stock.name;
           final changeText = _formatPercent(stock.changePercentage);
           final positive = stock.changePercentage != null && stock.changePercentage! >= 0;
@@ -381,11 +397,46 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              _DetailRow(label: '시가', value: _formatCurrency(stock.open)),
-              _DetailRow(label: '고가', value: _formatCurrency(stock.dayHigh)),
-              _DetailRow(label: '저가', value: _formatCurrency(stock.dayLow)),
-              _DetailRow(label: '전일 종가', value: _formatCurrency(stock.previousClose)),
-              _DetailRow(label: '거래량', value: _formatNumber(stock.volume)),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: financials.isEmpty
+                    ? const Text('최근 8분기 재무제표 데이터가 없습니다.', style: TextStyle(color: tossSubtext))
+                    : SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: DataTable(
+                          headingTextStyle: const TextStyle(
+                            color: tossText,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          columns: [
+                            const DataColumn(label: Text('항목')),
+                            ...financials.map((f) => DataColumn(label: Text(_shortDate(f.date)))),
+                          ],
+                          rows: [
+                            DataRow(cells: [
+                              const DataCell(Text('Revenue')),
+                              ...financials.map((f) => DataCell(Text(_formatCompactAmount(f.revenue)))),
+                            ]),
+                            DataRow(cells: [
+                              const DataCell(Text('Gross Profit')),
+                              ...financials.map((f) => DataCell(Text(_formatCompactAmount(f.grossProfit)))),
+                            ]),
+                            DataRow(cells: [
+                              const DataCell(Text('Operating Income')),
+                              ...financials.map((f) => DataCell(Text(_formatCompactAmount(f.operatingIncome)))),
+                            ]),
+                            DataRow(cells: [
+                              const DataCell(Text('Net Income')),
+                              ...financials.map((f) => DataCell(Text(_formatCompactAmount(f.netIncome)))),
+                            ]),
+                          ],
+                        ),
+                      ),
+              ),
             ],
           );
         },
@@ -404,52 +455,31 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
     return '$sign${value.toStringAsFixed(2)}%';
   }
 
-  String _formatNumber(double? value) {
-    if (value == null) return '-';
-    final rounded = value.round().toString();
-    final chars = rounded.split('');
-    final out = <String>[];
-    for (var i = 0; i < chars.length; i++) {
-      final reverseIndex = chars.length - i;
-      out.add(chars[i]);
-      if (reverseIndex > 1 && reverseIndex % 3 == 1) {
-        out.add(',');
-      }
+  String _shortDate(String date) {
+    if (date.length >= 7) {
+      return date.substring(2, 7).replaceAll('-', '/');
     }
-    return out.join();
+    return date;
+  }
+
+  String _formatCompactAmount(double? value) {
+    if (value == null) return '-';
+    final abs = value.abs();
+    if (abs >= 1000000000) return '${(value / 1000000000).toStringAsFixed(2)}B';
+    if (abs >= 1000000) return '${(value / 1000000).toStringAsFixed(2)}M';
+    if (abs >= 1000) return '${(value / 1000).toStringAsFixed(2)}K';
+    return value.toStringAsFixed(0);
   }
 }
 
-class _DetailRow extends StatelessWidget {
-  const _DetailRow({required this.label, required this.value});
+class _StockDetailPayload {
+  const _StockDetailPayload({
+    required this.detail,
+    required this.financials,
+  });
 
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: const TextStyle(color: tossSubtext)),
-          Text(
-            value,
-            style: const TextStyle(
-              color: tossText,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  final StockDetailItem detail;
+  final List<IncomeStatementItem> financials;
 }
 
 class _ActivityTile extends StatelessWidget {

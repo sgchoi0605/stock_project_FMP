@@ -4,6 +4,30 @@ import 'package:http/http.dart' as http;
 class ApiService {
   static const String baseUrl = 'http://127.0.0.1:8000';
 
+  static Future<List<IncomeStatementItem>> fetchFinancials(String symbol) async {
+    final trimmed = symbol.trim();
+    if (trimmed.isEmpty) {
+      throw Exception('Symbol is empty.');
+    }
+
+    final uri = Uri.parse('$baseUrl/financials/$trimmed');
+    final response = await http.get(uri);
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to fetch financials: ${response.statusCode} ${response.body}');
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! List) {
+      return const [];
+    }
+
+    return decoded
+        .whereType<Map<String, dynamic>>()
+        .map(IncomeStatementItem.fromJson)
+        .toList();
+  }
+
   static Future<List<StockSearchItem>> searchStocks(String query, {int limit = 20}) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) {
@@ -121,6 +145,32 @@ class StockDetailItem {
       dayLow: StockSearchItem._toDouble(json['dayLow']),
       previousClose: StockSearchItem._toDouble(json['previousClose']),
       volume: StockSearchItem._toDouble(json['volume']),
+    );
+  }
+}
+
+class IncomeStatementItem {
+  const IncomeStatementItem({
+    required this.date,
+    required this.revenue,
+    required this.grossProfit,
+    required this.operatingIncome,
+    required this.netIncome,
+  });
+
+  final String date;
+  final double? revenue;
+  final double? grossProfit;
+  final double? operatingIncome;
+  final double? netIncome;
+
+  factory IncomeStatementItem.fromJson(Map<String, dynamic> json) {
+    return IncomeStatementItem(
+      date: (json['date'] ?? '').toString(),
+      revenue: StockSearchItem._toDouble(json['revenue']),
+      grossProfit: StockSearchItem._toDouble(json['grossProfit']),
+      operatingIncome: StockSearchItem._toDouble(json['operatingIncome']),
+      netIncome: StockSearchItem._toDouble(json['netIncome']),
     );
   }
 }
