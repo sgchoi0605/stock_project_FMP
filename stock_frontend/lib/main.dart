@@ -199,8 +199,6 @@ class _HomeScreenState extends State<HomeScreen> {
           (stock) => _ActivityTile(
             title: stock.name.isEmpty ? stock.symbol : stock.name,
             subtitle: stock.symbol,
-            price: _formatPrice(stock.price),
-            value: _formatChange(stock.changePercentage),
             onTap: () {
               Navigator.of(context).push(
                 MaterialPageRoute<void>(
@@ -215,21 +213,6 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ],
     );
-  }
-
-  String _formatPrice(double? value) {
-    if (value == null) {
-      return '-';
-    }
-    return '\$${value.toStringAsFixed(2)}';
-  }
-
-  String _formatChange(double? value) {
-    if (value == null) {
-      return '-';
-    }
-    final sign = value > 0 ? '+' : '';
-    return '$sign${value.toStringAsFixed(2)}%';
   }
 }
 
@@ -473,21 +456,15 @@ class _ActivityTile extends StatelessWidget {
   const _ActivityTile({
     required this.title,
     required this.subtitle,
-    required this.price,
-    required this.value,
     this.onTap,
   });
 
   final String title;
   final String subtitle;
-  final String price;
-  final String value;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    final isPositive = value.startsWith('+');
-
     return Card(
       elevation: 0,
       color: Colors.white,
@@ -499,26 +476,7 @@ class _ActivityTile extends StatelessWidget {
           style: const TextStyle(color: tossText, fontWeight: FontWeight.w600),
         ),
         subtitle: Text(subtitle, style: const TextStyle(color: tossSubtext)),
-        trailing: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Text(
-              price,
-              style: const TextStyle(
-                color: tossText,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            Text(
-              value,
-              style: TextStyle(
-                color: value == '-' ? tossSubtext : (isPositive ? Colors.green : Colors.red),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
+        trailing: const Icon(Icons.chevron_right, color: tossSubtext),
       ),
     );
   }

@@ -17,6 +17,88 @@ BASE_URL = "https://financialmodelingprep.com/stable"
 V3_BASE_URL = "https://financialmodelingprep.com/api/v3"
 
 
+def _first_row(payload):
+    if isinstance(payload, list) and payload:
+        row = payload[0]
+        return row if isinstance(row, dict) else None
+    if isinstance(payload, dict):
+        if isinstance(payload.get("data"), list) and payload["data"]:
+            row = payload["data"][0]
+            return row if isinstance(row, dict) else None
+        if payload.get("symbol"):
+            return payload
+    return None
+
+
+def _fetch_quote_snapshot(symbol: str):
+    upper_symbol = symbol.upper()
+    snapshot = {
+        "symbol": upper_symbol,
+        "name": upper_symbol,
+        "price": None,
+        "changePercentage": None,
+        "open": None,
+        "dayHigh": None,
+        "dayLow": None,
+        "previousClose": None,
+        "volume": None,
+    }
+
+    candidates = [
+        (
+            f"{BASE_URL}/quote",
+            {"symbol": upper_symbol, "apikey": FMP_API_KEY},
+        ),
+        (
+            f"{V3_BASE_URL}/quote/{upper_symbol}",
+            {"apikey": FMP_API_KEY},
+        ),
+        (
+            f"{V3_BASE_URL}/quote-short/{upper_symbol}",
+            {"apikey": FMP_API_KEY},
+        ),
+    ]
+
+    for url, params in candidates:
+        response = requests.get(url, params=params, timeout=15)
+        if response.status_code != 200:
+            continue
+
+        row = _first_row(response.json())
+        if not row:
+            continue
+
+        snapshot["name"] = row.get("name") or row.get("companyName") or snapshot["name"]
+        snapshot["price"] = row.get("price") if row.get("price") is not None else snapshot["price"]
+        snapshot["changePercentage"] = (
+            row.get("changesPercentage")
+            if row.get("changesPercentage") is not None
+            else (row.get("changePercentage") if row.get("changePercentage") is not None else snapshot["changePercentage"])
+        )
+        snapshot["open"] = row.get("open") if row.get("open") is not None else snapshot["open"]
+        snapshot["dayHigh"] = row.get("dayHigh") if row.get("dayHigh") is not None else snapshot["dayHigh"]
+        snapshot["dayLow"] = row.get("dayLow") if row.get("dayLow") is not None else snapshot["dayLow"]
+        snapshot["previousClose"] = (
+            row.get("previousClose")
+            if row.get("previousClose") is not None
+            else snapshot["previousClose"]
+        )
+        snapshot["volume"] = row.get("volume") if row.get("volume") is not None else snapshot["volume"]
+
+    if snapshot["name"] == upper_symbol:
+        profile_resp = requests.get(
+            f"{V3_BASE_URL}/profile/{upper_symbol}",
+            params={"apikey": FMP_API_KEY},
+            timeout=15,
+        )
+        if profile_resp.status_code == 200:
+            profile = _first_row(profile_resp.json())
+            if profile:
+                snapshot["name"] = profile.get("companyName") or profile.get("name") or snapshot["name"]
+
+    return snapshot
+
+
 def _try_symbol_search(query: str, limit: int):
     candidates = [
         ("search-symbol", {"query": query, "limit": limit}),
@@ -50,82 +132,34 @@ def _try_symbol_search_v3(query: str, limit: int):
     return payload if isinstance(payload, list) else []
 
 
+def _is_us_listing(item: dict):
+    country = (item.get("country") or "").strip().upper()
+    if country in {"US", "USA", "UNITED STATES", "UNITED STATES OF AMERICA"}:
+        return True
+
+    exchange = (item.get("exchangeShortName") or item.get("exchange") or "").strip().upper()
+    us_exchanges = {
+        "NASDAQ",
+        "NYSE",
+        "AMEX",
+        "ARCA",
+        "BATS",
+        "CBOE",
+        "IEX",
+    }
+    return exchange in us_exchanges
+
+
 def _fetch_quote_for_symbol(symbol: str):
-    # Free plans may block bulk quote endpoints; fetch per-symbol and fallback.
-    price = None
-    change_pct = None
-
-    short_resp = requests.get(
-        f"{V3_BASE_URL}/quote-short/{symbol}",
-        params={"apikey": FMP_API_KEY},
-        timeout=15,
-    )
-    if short_resp.status_code == 200:
-        short_payload = short_resp.json()
-        if isinstance(short_payload, list) and short_payload:
-            price = short_payload[0].get("price")
-
-    quote_resp = requests.get(
-        f"{V3_BASE_URL}/quote/{symbol}",
-        params={"apikey": FMP_API_KEY},
-        timeout=15,
-    )
-    if quote_resp.status_code == 200:
-        quote_payload = quote_resp.json()
-        if isinstance(quote_payload, list) and quote_payload:
-            change_pct = quote_payload[0].get("changesPercentage")
-            if price is None:
-                price = quote_payload[0].get("price")
-
+    quote = _fetch_quote_snapshot(symbol)
     return {
-        "price": price,
-        "changePercentage": change_pct,
+        "price": quote.get("price"),
+        "changePercentage": quote.get("changePercentage"),
     }
 
 
 def _fetch_stock_detail(symbol: str):
-    upper_symbol = symbol.upper()
-    detail = {
-        "symbol": upper_symbol,
-        "name": upper_symbol,
-        "price": None,
-        "changePercentage": None,
-        "open": None,
-        "dayHigh": None,
-        "dayLow": None,
-        "previousClose": None,
-        "volume": None,
-    }
-
-    short_resp = requests.get(
-        f"{V3_BASE_URL}/quote-short/{upper_symbol}",
-        params={"apikey": FMP_API_KEY},
-        timeout=15,
-    )
-    if short_resp.status_code == 200:
-        short_payload = short_resp.json()
-        if isinstance(short_payload, list) and short_payload:
-            detail["price"] = short_payload[0].get("price")
-
-    quote_resp = requests.get(
-        f"{V3_BASE_URL}/quote/{upper_symbol}",
-        params={"apikey": FMP_API_KEY},
-        timeout=15,
-    )
-    if quote_resp.status_code == 200:
-        quote_payload = quote_resp.json()
-        if isinstance(quote_payload, list) and quote_payload:
-            quote = quote_payload[0]
-            detail["name"] = quote.get("name") or detail["name"]
-            detail["price"] = quote.get("price") if quote.get("price") is not None else detail["price"]
-            detail["changePercentage"] = quote.get("changesPercentage")
-            detail["open"] = quote.get("open")
-            detail["dayHigh"] = quote.get("dayHigh")
-            detail["dayLow"] = quote.get("dayLow")
-            detail["previousClose"] = quote.get("previousClose")
-            detail["volume"] = quote.get("volume")
-
-    return detail
+    return _fetch_quote_snapshot(symbol)
 
 
 @app.get("/financials/{symbol}")
@@ -159,6 +193,8 @@ def search_stocks(query: str, limit: int = 20):
     seen = set()
     rows = []
     for item in search_results:
+        if not _is_us_listing(item):
+            continue
         symbol = (item.get("symbol") or item.get("ticker") or "").upper()
         if not symbol or symbol in seen:
             continue
@@ -172,24 +208,14 @@ def search_stocks(query: str, limit: int = 20):
         if len(rows) >= limit:
             break
 
-    if not rows:
-        return []
-
-    merged = []
-    for row in rows:
-        q = _fetch_quote_for_symbol(row["symbol"])
-        merged.append(
-            {
-                "symbol": row["symbol"],
-                "name": row["name"],
-                "price": q.get("price"),
-                "changePercentage": q.get("changePercentage"),
-            }
-        )
-
-    return merged
+    return rows
 
 
 @app.get("/stock/{symbol}")
 def get_stock(symbol: str):
     return _fetch_stock_detail(symbol)
+
+
+#   실행 : cd stock_backend 후 uvicorn main:app --reload
+
+
